@@ -10,6 +10,8 @@ namespace FallingSand
         private int GridWidth = 300;
         private int GridHeight = 225;
         private const int PixelSize = 4;
+        private bool isImageGenerationStopped = false;
+
 
         private enum ElementType { Empty, Wood, Fire, Smoke, Ember, Sand }
 
@@ -38,6 +40,12 @@ namespace FallingSand
         private Point mouseGridPos = Point.Empty;
         private ElementType currentElement = ElementType.Fire;
 
+        // New UI Controls
+        private ProgressBar progressBar;
+        private Button stopButton;
+        private Label processStatusLabel;
+        private bool isGeneratingImage = false;
+
         public Form1()
         {
             InitializeComponent();
@@ -52,7 +60,7 @@ namespace FallingSand
             canvas = new Bitmap(GridWidth, GridHeight);
 
             Width = GridWidth * PixelSize + 40;
-            Height = GridHeight * PixelSize + 60;
+            Height = GridHeight * PixelSize + 100; // Added more space for the progress bar and button
             Text = "Image Fire Simulator";
 
             display = new PictureBox
@@ -63,6 +71,43 @@ namespace FallingSand
                 BackColor = Color.Black
             };
             Controls.Add(display);
+
+            // Create a panel to hold the progress bar, stop button, and process label
+            Panel bottomPanel = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 60,
+                Padding = new Padding(10)
+            };
+            Controls.Add(bottomPanel);
+
+            // Create the progress bar
+            progressBar = new ProgressBar
+            {
+                Width = Width - 40,
+                Style = ProgressBarStyle.Continuous
+            };
+            bottomPanel.Controls.Add(progressBar);
+
+            // Create the stop button
+            stopButton = new Button
+            {
+                Text = "Stop",
+                Top = progressBar.Bottom + 10,
+                Width = 100
+            };
+            stopButton.Click += StopButton_Click;
+            bottomPanel.Controls.Add(stopButton);
+
+            // Create the process status label
+            processStatusLabel = new Label
+            {
+                Text = "Status: Waiting for image...",
+                Top = progressBar.Bottom + 10,
+                Left = stopButton.Right + 10,
+                Width = 250
+            };
+            bottomPanel.Controls.Add(processStatusLabel);
 
             AllowDrop = true;
             DragEnter += (s, e) => e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
@@ -99,6 +144,16 @@ namespace FallingSand
             simulationTimer.Start();
         }
 
+        private void StopButton_Click(object sender, EventArgs e)
+        {
+            isGeneratingImage = false;  // Stop image generation
+            isImageGenerationStopped = true; // Set the flag that the process was stopped by the user
+            stopButton.Enabled = false;  // Disable the stop button
+            processStatusLabel.Text = "Status: Generation stopped by user.";  // Update the label to reflect the user stop
+        }
+
+
+
         private void UpdateMouseGridPosition(Point mousePos)
         {
             int x = mousePos.X / PixelSize;
@@ -116,37 +171,47 @@ namespace FallingSand
             {
                 try
                 {
+                    // Reset the flag to allow new generation to proceed
+                    isImageGenerationStopped = false;
+
+                    // Load the image asynchronously
                     Image img = Image.FromFile(files[0]);
                     Bitmap resized = await Task.Run(() => Pixelate(img, GridWidth, GridHeight));
 
+                    // Stop the simulation while we are processing the image
                     simulationTimer.Stop();
 
+                    // Reset the grid
                     for (int y = 0; y < GridHeight; y++)
                     {
                         for (int x = 0; x < GridWidth; x++)
                         {
-                            Color color = resized.GetPixel(x, y);
-                            if (color.A > 128)
-                            {
-                                grid[x, y] = ElementType.Wood;
-                                woodColors[x, y] = color;
-                                fireLifetimes[x, y] = null;
-                            }
-                            else
-                            {
-                                grid[x, y] = ElementType.Empty;
-                            }
+                            grid[x, y] = ElementType.Empty;
+                            fireLifetimes[x, y] = null;
+                            woodColors[x, y] = Color.Empty;
                         }
                     }
 
+                    // Start the image generation
+                    isGeneratingImage = true;
+                    progressBar.Value = 0;
+                    stopButton.Enabled = true;
+                    processStatusLabel.Text = "Status: Generation in progress...";
+
+                    // Start a new task to generate the image row by row
+                    await GenerateImageGradually(resized);
+
+                    // Restart the simulation timer after image is generated
                     simulationTimer.Start();
                 }
                 catch (Exception ex)
                 {
+                    processStatusLabel.Text = "Status: Error loading image.";
                     MessageBox.Show("Error loading image: " + ex.Message);
                 }
             }
         }
+
 
         private Bitmap Pixelate(Image image, int width, int height)
         {
@@ -158,6 +223,57 @@ namespace FallingSand
             }
             return resized;
         }
+
+        private async Task GenerateImageGradually(Bitmap resized)
+        {
+            int totalRows = GridHeight;
+            for (int y = 0; y < totalRows; y++)
+            {
+                if (!isGeneratingImage) break; // Stop if user clicked the stop button
+
+                for (int x = 0; x < GridWidth; x++)
+                {
+                    Color color = resized.GetPixel(x, y);
+                    if (color.A > 128)
+                    {
+                        grid[x, y] = ElementType.Wood;
+                        woodColors[x, y] = color;
+                        fireLifetimes[x, y] = null;
+                    }
+                    else
+                    {
+                        grid[x, y] = ElementType.Empty;
+                    }
+                }
+
+                // Update the progress bar
+                progressBar.Value = (int)((double)(y + 1) / totalRows * 100);
+
+                // Delay to simulate gradual image generation (adjust this to control the speed)
+                await Task.Delay(20); // 20ms delay between each row
+
+                Render(); // Re-render the grid with the updated row
+            }
+
+            // Finish the progress bar at 100% when done
+            progressBar.Value = 100;
+
+            // Check if the process was stopped by the user
+            if (isImageGenerationStopped)
+            {
+                processStatusLabel.Text = "Status: Generation stopped by user."; // Set the status message
+            }
+            else
+            {
+                // Update the label when the generation is complete
+                processStatusLabel.Text = "Status: Generation completed.";
+            }
+
+            // Disable the stop button once the generation is complete or stopped
+            stopButton.Enabled = false;
+        }
+
+
 
         private void UpdateSimulation()
         {
@@ -187,12 +303,12 @@ namespace FallingSand
 
             ElementType[,] nextGrid = (ElementType[,])grid.Clone();
             FireElement[,] nextFireLifetimes = (FireElement[,])fireLifetimes.Clone();
+            bool[,] moved = new bool[GridWidth, GridHeight];
 
             for (int y = GridHeight - 2; y >= 1; y--)
             {
                 for (int x = 1; x < GridWidth - 1; x++)
                 {
-                    // FIRE spread and decay
                     if (grid[x, y] == ElementType.Fire)
                     {
                         if (fireLifetimes[x, y] != null && DateTime.Now >= fireLifetimes[x, y].TimeToDie)
@@ -209,38 +325,38 @@ namespace FallingSand
                         }
                     }
 
-                    // SAND falling and pyramid logic
-                    if (grid[x, y] == ElementType.Sand)
+                    if (grid[x, y] == ElementType.Sand && !moved[x, y])
                     {
                         if (grid[x, y + 1] == ElementType.Empty)
                         {
                             nextGrid[x, y + 1] = ElementType.Sand;
                             nextGrid[x, y] = ElementType.Empty;
+                            moved[x, y + 1] = true;
                         }
-                        else if (x > 0 && grid[x - 1, y + 1] == ElementType.Empty)
+                        else if (grid[x - 1, y + 1] == ElementType.Empty)
                         {
                             nextGrid[x - 1, y + 1] = ElementType.Sand;
                             nextGrid[x, y] = ElementType.Empty;
+                            moved[x - 1, y + 1] = true;
                         }
-                        else if (x < GridWidth - 1 && grid[x + 1, y + 1] == ElementType.Empty)
+                        else if (grid[x + 1, y + 1] == ElementType.Empty)
                         {
                             nextGrid[x + 1, y + 1] = ElementType.Sand;
                             nextGrid[x, y] = ElementType.Empty;
+                            moved[x + 1, y + 1] = true;
                         }
                     }
                 }
             }
 
-            // SMOKE and EMBER behavior
             for (int y = 1; y < GridHeight; y++)
             {
                 for (int x = 0; x < GridWidth; x++)
                 {
                     if (grid[x, y] == ElementType.Smoke)
                     {
-                        int swayAmount = rand.Next(-1, 2);
-                        int newX = x + swayAmount;
-
+                        int sway = rand.Next(-1, 2);
+                        int newX = x + sway;
                         if (newX >= 0 && newX < GridWidth && grid[newX, y - 1] == ElementType.Empty)
                         {
                             nextGrid[newX, y - 1] = ElementType.Smoke;
@@ -262,7 +378,6 @@ namespace FallingSand
             fireLifetimes = nextFireLifetimes;
             Render();
         }
-
 
         private void TrySpread(int x, int y, ElementType[,] nextGrid, FireElement[,] nextFireLifetimes)
         {
@@ -287,16 +402,11 @@ namespace FallingSand
                         Color color = Color.Black;
                         switch (grid[x, y])
                         {
-                            case ElementType.Wood:
-                                color = woodColors[x, y]; break;
-                            case ElementType.Fire:
-                                color = Color.OrangeRed; break;
-                            case ElementType.Smoke:
-                                color = Color.FromArgb(80, 80, 80); break;
-                            case ElementType.Ember:
-                                color = Color.FromArgb(139, 0, 0); break;
-                            case ElementType.Sand:
-                                color = Color.Gold; break;
+                            case ElementType.Wood: color = woodColors[x, y]; break;
+                            case ElementType.Fire: color = Color.OrangeRed; break;
+                            case ElementType.Smoke: color = Color.FromArgb(80, 80, 80); break;
+                            case ElementType.Ember: color = Color.FromArgb(139, 0, 0); break;
+                            case ElementType.Sand: color = Color.Gold; break;
                         }
                         canvas.SetPixel(x, y, color);
                     }
@@ -313,7 +423,5 @@ namespace FallingSand
             display.Image?.Dispose();
             display.Image = scaled;
         }
-
-        private void Form1_Load(object sender, EventArgs e) { }
     }
 }
