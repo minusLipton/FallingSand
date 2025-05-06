@@ -10,10 +10,8 @@ namespace FallingSand
         private int GridWidth = 300;
         private int GridHeight = 225;
         private const int PixelSize = 4;
-        private bool isImageGenerationStopped = false;
 
-
-        private enum ElementType { Empty, Wood, Fire, Smoke, Ember, Sand }
+        private enum ElementType { Empty, Wood, Fire, Smoke, Ember, Sand, Water }
 
         private class FireElement
         {
@@ -40,7 +38,6 @@ namespace FallingSand
         private Point mouseGridPos = Point.Empty;
         private ElementType currentElement = ElementType.Fire;
 
-        // New UI Controls
         private ProgressBar progressBar;
         private Button stopButton;
         private Label processStatusLabel;
@@ -54,13 +51,16 @@ namespace FallingSand
 
         private void InitializeSimulation()
         {
+            this.KeyPreview = true;
+            this.KeyDown += Form1_KeyDown;
+
             grid = new ElementType[GridWidth, GridHeight];
             fireLifetimes = new FireElement[GridWidth, GridHeight];
             woodColors = new Color[GridWidth, GridHeight];
             canvas = new Bitmap(GridWidth, GridHeight);
 
             Width = GridWidth * PixelSize + 40;
-            Height = GridHeight * PixelSize + 100; // Added more space for the progress bar and button
+            Height = GridHeight * PixelSize + 100;
             Text = "Image Fire Simulator";
 
             display = new PictureBox
@@ -72,7 +72,6 @@ namespace FallingSand
             };
             Controls.Add(display);
 
-            // Create a panel to hold the progress bar, stop button, and process label
             Panel bottomPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
@@ -81,7 +80,6 @@ namespace FallingSand
             };
             Controls.Add(bottomPanel);
 
-            // Create the progress bar
             progressBar = new ProgressBar
             {
                 Width = Width - 40,
@@ -89,7 +87,6 @@ namespace FallingSand
             };
             bottomPanel.Controls.Add(progressBar);
 
-            // Create the stop button
             stopButton = new Button
             {
                 Text = "Stop",
@@ -99,7 +96,6 @@ namespace FallingSand
             stopButton.Click += StopButton_Click;
             bottomPanel.Controls.Add(stopButton);
 
-            // Create the process status label
             processStatusLabel = new Label
             {
                 Text = "Status: Waiting for image...",
@@ -127,32 +123,30 @@ namespace FallingSand
                     UpdateMouseGridPosition(e.Location);
             };
 
-            this.KeyDown += (s, e) =>
-            {
-                switch (e.KeyCode)
-                {
-                    case Keys.D1: currentElement = ElementType.Fire; break;
-                    case Keys.D2: currentElement = ElementType.Sand; break;
-                    case Keys.D3: currentElement = ElementType.Wood; break;
-                    case Keys.D4: currentElement = ElementType.Smoke; break;
-                    case Keys.D5: currentElement = ElementType.Ember; break;
-                }
-            };
-
             simulationTimer = new System.Windows.Forms.Timer { Interval = 33 };
             simulationTimer.Tick += (s, e) => UpdateSimulation();
             simulationTimer.Start();
         }
 
-        private void StopButton_Click(object sender, EventArgs e)
+        private void Form1_KeyDown(object sender, KeyEventArgs e)
         {
-            isGeneratingImage = false;  // Stop image generation
-            isImageGenerationStopped = true; // Set the flag that the process was stopped by the user
-            stopButton.Enabled = false;  // Disable the stop button
-            processStatusLabel.Text = "Status: Generation stopped by user.";  // Update the label to reflect the user stop
+            switch (e.KeyCode)
+            {
+                case Keys.D1: currentElement = ElementType.Fire; break;
+                case Keys.D2: currentElement = ElementType.Sand; break;
+                case Keys.D3: currentElement = ElementType.Wood; break;
+                case Keys.D4: currentElement = ElementType.Smoke; break;
+                case Keys.D5: currentElement = ElementType.Ember; break;
+                case Keys.D6: currentElement = ElementType.Water; break;
+            }
         }
 
-
+        private void StopButton_Click(object sender, EventArgs e)
+        {
+            isGeneratingImage = false;
+            stopButton.Enabled = false;
+            processStatusLabel.Text = "Status: Generation stopped by user";
+        }
 
         private void UpdateMouseGridPosition(Point mousePos)
         {
@@ -171,37 +165,38 @@ namespace FallingSand
             {
                 try
                 {
-                    // Reset the flag to allow new generation to proceed
-                    isImageGenerationStopped = false;
-
-                    // Load the image asynchronously
                     Image img = Image.FromFile(files[0]);
                     Bitmap resized = await Task.Run(() => Pixelate(img, GridWidth, GridHeight));
 
-                    // Stop the simulation while we are processing the image
-                    simulationTimer.Stop();
+                    //simulationTimer.Stop();
 
-                    // Reset the grid
                     for (int y = 0; y < GridHeight; y++)
-                    {
                         for (int x = 0; x < GridWidth; x++)
                         {
                             grid[x, y] = ElementType.Empty;
                             fireLifetimes[x, y] = null;
                             woodColors[x, y] = Color.Empty;
                         }
-                    }
 
-                    // Start the image generation
                     isGeneratingImage = true;
                     progressBar.Value = 0;
                     stopButton.Enabled = true;
                     processStatusLabel.Text = "Status: Generation in progress...";
 
-                    // Start a new task to generate the image row by row
                     await GenerateImageGradually(resized);
 
-                    // Restart the simulation timer after image is generated
+                    if (isGeneratingImage)
+                    {
+                        progressBar.Value = 100;
+                        processStatusLabel.Text = "Status: Generation completed.";
+                        stopButton.Enabled = false;
+                    }
+                    else
+                    {
+                        processStatusLabel.Text = "Status: Generation stopped by user";
+                    }
+
+                    isGeneratingImage = false;
                     simulationTimer.Start();
                 }
                 catch (Exception ex)
@@ -211,7 +206,6 @@ namespace FallingSand
                 }
             }
         }
-
 
         private Bitmap Pixelate(Image image, int width, int height)
         {
@@ -229,7 +223,7 @@ namespace FallingSand
             int totalRows = GridHeight;
             for (int y = 0; y < totalRows; y++)
             {
-                if (!isGeneratingImage) break; // Stop if user clicked the stop button
+                if (!isGeneratingImage) break;
 
                 for (int x = 0; x < GridWidth; x++)
                 {
@@ -246,33 +240,11 @@ namespace FallingSand
                     }
                 }
 
-                // Update the progress bar
                 progressBar.Value = (int)((double)(y + 1) / totalRows * 100);
-
-                // Delay to simulate gradual image generation (adjust this to control the speed)
-                await Task.Delay(20); // 20ms delay between each row
-
-                Render(); // Re-render the grid with the updated row
+                await Task.Delay(20);
+                Render();
             }
-
-            // Finish the progress bar at 100% when done
-            progressBar.Value = 100;
-
-            // Check if the process was stopped by the user
-            if (isImageGenerationStopped)
-            {
-                processStatusLabel.Text = "Status: Generation stopped by user."; // Set the status message
-            }
-            else
-            {
-                // Update the label when the generation is complete
-                processStatusLabel.Text = "Status: Generation completed.";
-            }
-
-            // Disable the stop button once the generation is complete or stopped
-            stopButton.Enabled = false;
         }
-
 
 
         private void UpdateSimulation()
@@ -284,23 +256,50 @@ namespace FallingSand
 
                 if (x >= 0 && x < GridWidth && y >= 0 && y < GridHeight)
                 {
-                    if (currentElement == ElementType.Fire)
+                    // Determine brush size based on the current element
+                    int brushSizeX = 0, brushSizeY = 0;
+                    if (currentElement == ElementType.Water || currentElement == ElementType.Sand)
                     {
-                        grid[x, y] = ElementType.Fire;
-                        fireLifetimes[x, y] = new FireElement(rand.Next(500, 2000));
+                        brushSizeX = 3; // 3x3 for Water and Sand
+                        brushSizeY = 3;
                     }
                     else if (currentElement == ElementType.Wood)
                     {
-                        grid[x, y] = ElementType.Wood;
-                        woodColors[x, y] = Color.SaddleBrown;
+                        brushSizeX = 5; // 5x5 for Wood
+                        brushSizeY = 5;
                     }
-                    else
+
+                    // Loop through the grid cells within the brush size
+                    for (int i = -brushSizeX / 2; i <= brushSizeX / 2; i++)
                     {
-                        grid[x, y] = currentElement;
+                        for (int j = -brushSizeY / 2; j <= brushSizeY / 2; j++)
+                        {
+                            int newX = x + i;
+                            int newY = y + j;
+
+                            if (newX >= 0 && newX < GridWidth && newY >= 0 && newY < GridHeight)
+                            {
+                                if (currentElement == ElementType.Fire)
+                                {
+                                    grid[newX, newY] = ElementType.Fire;
+                                    fireLifetimes[newX, newY] = new FireElement(rand.Next(500, 2000));
+                                }
+                                else if (currentElement == ElementType.Wood)
+                                {
+                                    grid[newX, newY] = ElementType.Wood;
+                                    woodColors[newX, newY] = Color.SaddleBrown;
+                                }
+                                else
+                                {
+                                    grid[newX, newY] = currentElement;
+                                }
+                            }
+                        }
                     }
                 }
             }
 
+            // Continue the rest of the simulation logic as before
             ElementType[,] nextGrid = (ElementType[,])grid.Clone();
             FireElement[,] nextFireLifetimes = (FireElement[,])fireLifetimes.Clone();
             bool[,] moved = new bool[GridWidth, GridHeight];
@@ -325,25 +324,87 @@ namespace FallingSand
                         }
                     }
 
-                    if (grid[x, y] == ElementType.Sand && !moved[x, y])
+                    if ((grid[x, y] == ElementType.Sand || grid[x, y] == ElementType.Water) && !moved[x, y])
                     {
+                        bool isWater = grid[x, y] == ElementType.Water;
+
+                        // Movement logic for water and sand as before...
                         if (grid[x, y + 1] == ElementType.Empty)
                         {
-                            nextGrid[x, y + 1] = ElementType.Sand;
+                            nextGrid[x, y + 1] = grid[x, y];
                             nextGrid[x, y] = ElementType.Empty;
                             moved[x, y + 1] = true;
                         }
                         else if (grid[x - 1, y + 1] == ElementType.Empty)
                         {
-                            nextGrid[x - 1, y + 1] = ElementType.Sand;
+                            nextGrid[x - 1, y + 1] = grid[x, y];
                             nextGrid[x, y] = ElementType.Empty;
                             moved[x - 1, y + 1] = true;
                         }
                         else if (grid[x + 1, y + 1] == ElementType.Empty)
                         {
-                            nextGrid[x + 1, y + 1] = ElementType.Sand;
+                            nextGrid[x + 1, y + 1] = grid[x, y];
                             nextGrid[x, y] = ElementType.Empty;
                             moved[x + 1, y + 1] = true;
+                        }
+                        else if (isWater)
+                        {
+                            // 1. Try to move straight down
+                            if (grid[x, y + 1] == ElementType.Empty)
+                            {
+                                nextGrid[x, y + 1] = ElementType.Water;
+                                nextGrid[x, y] = ElementType.Empty;
+                                moved[x, y + 1] = true;
+                            }
+                            else
+                            {
+                                // 2. Try diagonal left
+                                if (x > 0 && grid[x - 1, y + 1] == ElementType.Empty)
+                                {
+                                    nextGrid[x - 1, y + 1] = ElementType.Water;
+                                    nextGrid[x, y] = ElementType.Empty;
+                                    moved[x - 1, y + 1] = true;
+                                }
+                                // 3. Try diagonal right
+                                else if (x < GridWidth - 1 && grid[x + 1, y + 1] == ElementType.Empty)
+                                {
+                                    nextGrid[x + 1, y + 1] = ElementType.Water;
+                                    nextGrid[x, y] = ElementType.Empty;
+                                    moved[x + 1, y + 1] = true;
+                                }
+                                else
+                                {
+                                    // 4. Scan left
+                                    for (int offset = 1; x - offset > 0; offset++)
+                                    {
+                                        if (grid[x - offset, y] != ElementType.Empty)
+                                            break; // Wall on left
+
+                                        if (grid[x - offset, y + 1] == ElementType.Empty)
+                                        {
+                                            nextGrid[x - offset, y + 1] = ElementType.Water;
+                                            nextGrid[x, y] = ElementType.Empty;
+                                            moved[x - offset, y + 1] = true;
+                                            break;
+                                        }
+                                    }
+
+                                    // 5. Scan right
+                                    for (int offset = 1; x + offset < GridWidth; offset++)
+                                    {
+                                        if (grid[x + offset, y] != ElementType.Empty)
+                                            break; // Wall on right
+
+                                        if (grid[x + offset, y + 1] == ElementType.Empty)
+                                        {
+                                            nextGrid[x + offset, y + 1] = ElementType.Water;
+                                            nextGrid[x, y] = ElementType.Empty;
+                                            moved[x + offset, y + 1] = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -379,6 +440,36 @@ namespace FallingSand
             Render();
         }
 
+
+
+        private void FillContainer(int startX, int startY, ref ElementType[,] nextGrid)
+        {
+            // Create a stack to simulate DFS (Depth-First Search) to find and fill the connected empty spaces
+            Stack<Point> stack = new Stack<Point>();
+            stack.Push(new Point(startX, startY));
+
+            while (stack.Count > 0)
+            {
+                Point current = stack.Pop();
+                int cx = current.X;
+                int cy = current.Y;
+
+                // If the position is out of bounds or not empty, continue to the next iteration
+                if (cx < 0 || cx >= GridWidth || cy < 0 || cy >= GridHeight || grid[cx, cy] != ElementType.Empty)
+                    continue;
+
+                // Mark the current position as water (this simulates filling the container)
+                nextGrid[cx, cy] = ElementType.Water;
+
+                // Add neighboring cells to the stack (left, right, down, up)
+                stack.Push(new Point(cx + 1, cy));
+                stack.Push(new Point(cx - 1, cy));
+                stack.Push(new Point(cx, cy + 1));
+                stack.Push(new Point(cx, cy - 1));
+            }
+        }
+
+
         private void TrySpread(int x, int y, ElementType[,] nextGrid, FireElement[,] nextFireLifetimes)
         {
             if (x >= 0 && x < GridWidth && y >= 0 && y < GridHeight)
@@ -407,6 +498,7 @@ namespace FallingSand
                             case ElementType.Smoke: color = Color.FromArgb(80, 80, 80); break;
                             case ElementType.Ember: color = Color.FromArgb(139, 0, 0); break;
                             case ElementType.Sand: color = Color.Gold; break;
+                            case ElementType.Water: color = Color.DeepSkyBlue; break;
                         }
                         canvas.SetPixel(x, y, color);
                     }
