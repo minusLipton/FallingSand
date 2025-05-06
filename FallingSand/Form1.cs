@@ -192,6 +192,7 @@ namespace FallingSand
             {
                 for (int x = 1; x < GridWidth - 1; x++)
                 {
+                    // FIRE spread and decay
                     if (grid[x, y] == ElementType.Fire)
                     {
                         if (fireLifetimes[x, y] != null && DateTime.Now >= fireLifetimes[x, y].TimeToDie)
@@ -208,14 +209,29 @@ namespace FallingSand
                         }
                     }
 
-                    if (grid[x, y] == ElementType.Sand && grid[x, y + 1] == ElementType.Empty)
+                    // SAND falling and pyramid logic
+                    if (grid[x, y] == ElementType.Sand)
                     {
-                        nextGrid[x, y + 1] = ElementType.Sand;
-                        nextGrid[x, y] = ElementType.Empty;
+                        if (grid[x, y + 1] == ElementType.Empty)
+                        {
+                            nextGrid[x, y + 1] = ElementType.Sand;
+                            nextGrid[x, y] = ElementType.Empty;
+                        }
+                        else if (x > 0 && grid[x - 1, y + 1] == ElementType.Empty)
+                        {
+                            nextGrid[x - 1, y + 1] = ElementType.Sand;
+                            nextGrid[x, y] = ElementType.Empty;
+                        }
+                        else if (x < GridWidth - 1 && grid[x + 1, y + 1] == ElementType.Empty)
+                        {
+                            nextGrid[x + 1, y + 1] = ElementType.Sand;
+                            nextGrid[x, y] = ElementType.Empty;
+                        }
                     }
                 }
             }
 
+            // SMOKE and EMBER behavior
             for (int y = 1; y < GridHeight; y++)
             {
                 for (int x = 0; x < GridWidth; x++)
@@ -246,6 +262,7 @@ namespace FallingSand
             fireLifetimes = nextFireLifetimes;
             Render();
         }
+
 
         private void TrySpread(int x, int y, ElementType[,] nextGrid, FireElement[,] nextFireLifetimes)
         {
