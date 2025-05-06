@@ -11,7 +11,7 @@ namespace FallingSand
         private int GridHeight = 225;
         private const int PixelSize = 4;
 
-        private enum ElementType { Empty, Wood, Fire, Smoke, Ember }
+        private enum ElementType { Empty, Wood, Fire, Smoke, Ember, Sand }
 
         private class FireElement
         {
@@ -33,6 +33,10 @@ namespace FallingSand
         private PictureBox display;
         private System.Windows.Forms.Timer simulationTimer;
         private Random rand = new Random();
+
+        private bool isMouseDown = false;
+        private Point mouseGridPos = Point.Empty;
+        private ElementType currentElement = ElementType.Fire;
 
         public Form1()
         {
@@ -66,18 +70,43 @@ namespace FallingSand
 
             display.MouseDown += (s, e) =>
             {
-                int x = e.X / PixelSize;
-                int y = e.Y / PixelSize;
-                if (x >= 0 && x < GridWidth && y >= 0 && y < GridHeight)
+                isMouseDown = true;
+                UpdateMouseGridPosition(e.Location);
+            };
+
+            display.MouseUp += (s, e) => isMouseDown = false;
+
+            display.MouseMove += (s, e) =>
+            {
+                if (isMouseDown)
+                    UpdateMouseGridPosition(e.Location);
+            };
+
+            this.KeyDown += (s, e) =>
+            {
+                switch (e.KeyCode)
                 {
-                    grid[x, y] = ElementType.Fire;
-                    fireLifetimes[x, y] = new FireElement(rand.Next(500, 2000));
+                    case Keys.D1: currentElement = ElementType.Fire; break;
+                    case Keys.D2: currentElement = ElementType.Sand; break;
+                    case Keys.D3: currentElement = ElementType.Wood; break;
+                    case Keys.D4: currentElement = ElementType.Smoke; break;
+                    case Keys.D5: currentElement = ElementType.Ember; break;
                 }
             };
 
             simulationTimer = new System.Windows.Forms.Timer { Interval = 33 };
             simulationTimer.Tick += (s, e) => UpdateSimulation();
             simulationTimer.Start();
+        }
+
+        private void UpdateMouseGridPosition(Point mousePos)
+        {
+            int x = mousePos.X / PixelSize;
+            int y = mousePos.Y / PixelSize;
+            if (x >= 0 && x < GridWidth && y >= 0 && y < GridHeight)
+            {
+                mouseGridPos = new Point(x, y);
+            }
         }
 
         private async void OnImageDropped(object sender, DragEventArgs e)
@@ -132,10 +161,33 @@ namespace FallingSand
 
         private void UpdateSimulation()
         {
+            if (isMouseDown)
+            {
+                int x = mouseGridPos.X;
+                int y = mouseGridPos.Y;
+
+                if (x >= 0 && x < GridWidth && y >= 0 && y < GridHeight)
+                {
+                    if (currentElement == ElementType.Fire)
+                    {
+                        grid[x, y] = ElementType.Fire;
+                        fireLifetimes[x, y] = new FireElement(rand.Next(500, 2000));
+                    }
+                    else if (currentElement == ElementType.Wood)
+                    {
+                        grid[x, y] = ElementType.Wood;
+                        woodColors[x, y] = Color.SaddleBrown;
+                    }
+                    else
+                    {
+                        grid[x, y] = currentElement;
+                    }
+                }
+            }
+
             ElementType[,] nextGrid = (ElementType[,])grid.Clone();
             FireElement[,] nextFireLifetimes = (FireElement[,])fireLifetimes.Clone();
 
-            // Spread fire and smoke
             for (int y = GridHeight - 2; y >= 1; y--)
             {
                 for (int x = 1; x < GridWidth - 1; x++)
@@ -149,40 +201,43 @@ namespace FallingSand
                         }
                         else
                         {
-                            TrySpread(x - 1, y, nextGrid, nextFireLifetimes);  // Left
-                            TrySpread(x + 1, y, nextGrid, nextFireLifetimes);  // Right
-                            TrySpread(x, y + 1, nextGrid, nextFireLifetimes);  // Down
-                            TrySpread(x, y - 1, nextGrid, nextFireLifetimes);  // Up
+                            TrySpread(x - 1, y, nextGrid, nextFireLifetimes);
+                            TrySpread(x + 1, y, nextGrid, nextFireLifetimes);
+                            TrySpread(x, y + 1, nextGrid, nextFireLifetimes);
+                            TrySpread(x, y - 1, nextGrid, nextFireLifetimes);
                         }
+                    }
+
+                    if (grid[x, y] == ElementType.Sand && grid[x, y + 1] == ElementType.Empty)
+                    {
+                        nextGrid[x, y + 1] = ElementType.Sand;
+                        nextGrid[x, y] = ElementType.Empty;
                     }
                 }
             }
 
-            // Smoke floating up with swaying left and right
             for (int y = 1; y < GridHeight; y++)
             {
                 for (int x = 0; x < GridWidth; x++)
                 {
                     if (grid[x, y] == ElementType.Smoke)
                     {
-                        // Randomly move smoke left or right and move it upwards
-                        int swayAmount = rand.Next(-1, 2);  // Random value between -1, 0, and 1
+                        int swayAmount = rand.Next(-1, 2);
                         int newX = x + swayAmount;
 
-                        // Check if the new X position is within bounds
                         if (newX >= 0 && newX < GridWidth && grid[newX, y - 1] == ElementType.Empty)
                         {
-                            nextGrid[newX, y - 1] = ElementType.Smoke; // Smoke moves up and sways
-                            nextGrid[x, y] = ElementType.Empty;        // Previous smoke spot becomes empty
+                            nextGrid[newX, y - 1] = ElementType.Smoke;
+                            nextGrid[x, y] = ElementType.Empty;
                         }
                         else if (rand.NextDouble() < 0.02)
                         {
-                            nextGrid[x, y] = ElementType.Empty; // Smoke disappears after some time
+                            nextGrid[x, y] = ElementType.Empty;
                         }
                     }
                     else if (grid[x, y] == ElementType.Ember && rand.NextDouble() < 0.05)
                     {
-                        nextGrid[x, y] = ElementType.Empty; // Ember fades away
+                        nextGrid[x, y] = ElementType.Empty;
                     }
                 }
             }
@@ -223,6 +278,8 @@ namespace FallingSand
                                 color = Color.FromArgb(80, 80, 80); break;
                             case ElementType.Ember:
                                 color = Color.FromArgb(139, 0, 0); break;
+                            case ElementType.Sand:
+                                color = Color.Gold; break;
                         }
                         canvas.SetPixel(x, y, color);
                     }
@@ -240,9 +297,6 @@ namespace FallingSand
             display.Image = scaled;
         }
 
-        private void Form1_Load(object sender, EventArgs e)
-        {
-
-        }
+        private void Form1_Load(object sender, EventArgs e) { }
     }
 }
